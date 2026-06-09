@@ -9,34 +9,180 @@ const demoCsv = `date,description,amount,currency
 2026-05-06,Pharmacy,-24.30,EUR
 2026-05-07,Restaurant,-67.40,EUR`;
 
+const delimiterNames = {
+  ",": "запятая",
+  ";": "точка с запятой",
+  "\t": "tab"
+};
+
 const categoryRules = [
   {
     category: "Продукты",
-    keywords: ["biedronka", "lidl", "aldi", "carrefour", "auchan", "grocery", "market", "supermarket", "food"]
+    keywords: [
+      "biedronka",
+      "lidl",
+      "aldi",
+      "carrefour",
+      "auchan",
+      "grocery",
+      "market",
+      "supermarket",
+      "food",
+      "sklep",
+      "produkty"
+    ]
   },
   {
     category: "Транспорт",
-    keywords: ["uber", "bolt", "taxi", "metro", "bus", "train", "tram", "fuel", "parking", "transport"]
+    keywords: [
+      "uber",
+      "bolt",
+      "taxi",
+      "metro",
+      "bus",
+      "train",
+      "tram",
+      "fuel",
+      "parking",
+      "transport",
+      "paliwo",
+      "bilet"
+    ]
   },
   {
     category: "Жильё",
-    keywords: ["rent", "apartment", "landlord", "mortgage", "home", "housing", "czynsz", "utilities"]
+    keywords: [
+      "rent",
+      "apartment",
+      "landlord",
+      "mortgage",
+      "home",
+      "housing",
+      "czynsz",
+      "utilities",
+      "mieszkanie",
+      "prąd",
+      "gaz"
+    ]
   },
   {
     category: "Подписки",
-    keywords: ["netflix", "spotify", "youtube", "subscription", "apple", "google", "icloud", "prime"]
+    keywords: [
+      "netflix",
+      "spotify",
+      "youtube",
+      "subscription",
+      "apple",
+      "google",
+      "icloud",
+      "prime",
+      "abonament"
+    ]
   },
   {
     category: "Здоровье",
-    keywords: ["pharmacy", "apteka", "doctor", "clinic", "medical", "health", "dentist", "medicine"]
+    keywords: [
+      "pharmacy",
+      "apteka",
+      "doctor",
+      "clinic",
+      "medical",
+      "health",
+      "dentist",
+      "medicine",
+      "lekarz",
+      "zdrowie"
+    ]
   },
   {
     category: "Рестораны",
-    keywords: ["restaurant", "cafe", "coffee", "bar", "pizza", "burger", "kebab", "dinner", "lunch"]
+    keywords: [
+      "restaurant",
+      "cafe",
+      "coffee",
+      "bar",
+      "pizza",
+      "burger",
+      "kebab",
+      "dinner",
+      "lunch",
+      "restauracja",
+      "kawiarnia"
+    ]
   }
 ];
 
-function splitCsvLine(line) {
+const columnAliases = {
+  date: ["date", "data", "data operacji", "transaction date", "дата"],
+  description: [
+    "description",
+    "opis",
+    "opis operacji",
+    "opis transakcji",
+    "merchant",
+    "details",
+    "описание"
+  ],
+  amount: ["amount", "kwota", "kwota operacji", "value", "suma", "сумма"],
+  currency: ["currency", "waluta", "curr", "ccy", "валюта"]
+};
+
+function normalizeHeader(header) {
+  return String(header || "")
+    .replace(/^\uFEFF/, "")
+    .replace(/^"|"$/g, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .normalize("NFC");
+}
+
+function countDelimiterOutsideQuotes(line, delimiter) {
+  let count = 0;
+  let insideQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    const nextChar = line[i + 1];
+
+    if (char === '"' && insideQuotes && nextChar === '"') {
+      i += 1;
+    } else if (char === '"') {
+      insideQuotes = !insideQuotes;
+    } else if (char === delimiter && !insideQuotes) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function detectDelimiter(text) {
+  const sampleLines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+
+  const delimiters = [",", ";", "\t"];
+  const scores = delimiters.map((delimiter) => ({
+    delimiter,
+    score: sampleLines.reduce(
+      (sum, line) => sum + countDelimiterOutsideQuotes(line, delimiter),
+      0
+    )
+  }));
+
+  const best = scores.sort((a, b) => b.score - a.score)[0];
+
+  if (!best || best.score === 0) {
+    return ",";
+  }
+
+  return best.delimiter;
+}
+
+function splitCsvLine(line, delimiter) {
   const result = [];
   let current = "";
   let insideQuotes = false;
@@ -50,7 +196,7 @@ function splitCsvLine(line) {
       i += 1;
     } else if (char === '"') {
       insideQuotes = !insideQuotes;
-    } else if (char === "," && !insideQuotes) {
+    } else if (char === delimiter && !insideQuotes) {
       result.push(current.trim());
       current = "";
     } else {
@@ -62,49 +208,154 @@ function splitCsvLine(line) {
   return result;
 }
 
+function parseAmount(value) {
+  let normalized = String(value || "")
+    .replace(/\u00A0/g, " ")
+    .replace(/\s/g, "")
+    .replace(/[^\d.,+\-]/g, "")
+    .trim();
+
+  if (!normalized) {
+    return Number.NaN;
+  }
+
+  const lastComma = normalized.lastIndexOf(",");
+  const lastDot = normalized.lastIndexOf(".");
+
+  if (lastComma > -1 && lastDot > -1) {
+    if (lastComma > lastDot) {
+      normalized = normalized.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = normalized.replace(/,/g, "");
+    }
+  } else if (lastComma > -1) {
+    normalized = normalized.replace(",", ".");
+  }
+
+  return Number(normalized);
+}
+
+function findColumnIndex(headers, type) {
+  const aliases = columnAliases[type];
+  return headers.findIndex((header) => aliases.includes(header));
+}
+
+function decodeArrayBuffer(arrayBuffer) {
+  const tryDecode = (encoding, fatal = false) => {
+    try {
+      const decoder = new TextDecoder(encoding, { fatal });
+      return decoder.decode(arrayBuffer);
+    } catch {
+      return "";
+    }
+  };
+
+  const utf8Text = tryDecode("utf-8", true);
+
+  if (utf8Text && !utf8Text.includes("�")) {
+    return {
+      text: utf8Text,
+      encoding: "UTF-8"
+    };
+  }
+
+  const windowsText = tryDecode("windows-1250");
+
+  if (windowsText) {
+    return {
+      text: windowsText,
+      encoding: "Windows-1250"
+    };
+  }
+
+  return {
+    text: tryDecode("utf-8"),
+    encoding: "UTF-8"
+  };
+}
+
 function parseCsv(text) {
-  const lines = text
-    .trim()
+  const cleanText = String(text || "").replace(/^\uFEFF/, "").trim();
+
+  if (!cleanText) {
+    throw new Error("Файл не удалось обработать. Проверьте формат CSV.");
+  }
+
+  const delimiter = detectDelimiter(cleanText);
+  const lines = cleanText
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
 
   if (lines.length < 2) {
-    throw new Error("CSV-файл должен содержать заголовок и хотя бы одну операцию.");
+    throw new Error("Файл не удалось обработать. Проверьте формат CSV.");
   }
 
-  const headers = splitCsvLine(lines[0]).map((header) => header.toLowerCase());
-  const requiredHeaders = ["date", "description", "amount", "currency"];
+  const rawHeaders = splitCsvLine(lines[0], delimiter);
+  const headers = rawHeaders.map(normalizeHeader);
 
-  const missingHeaders = requiredHeaders.filter((header) => !headers.includes(header));
-  if (missingHeaders.length > 0) {
-    throw new Error(`В CSV не хватает колонок: ${missingHeaders.join(", ")}.`);
+  const dateIndex = findColumnIndex(headers, "date");
+  const descriptionIndex = findColumnIndex(headers, "description");
+  const amountIndex = findColumnIndex(headers, "amount");
+  const currencyIndex = findColumnIndex(headers, "currency");
+
+  if (dateIndex === -1 || descriptionIndex === -1 || amountIndex === -1) {
+    throw new Error("Файл не удалось обработать. Проверьте формат CSV.");
   }
 
-  const transactions = lines.slice(1).map((line, index) => {
-    const values = splitCsvLine(line);
-    const row = headers.reduce((acc, header, headerIndex) => {
-      acc[header] = values[headerIndex] || "";
-      return acc;
-    }, {});
+  const transactions = lines
+    .slice(1)
+    .map((line, index) => {
+      const values = splitCsvLine(line, delimiter);
 
-    const amount = Number(String(row.amount).replace(",", "."));
+      const date = values[dateIndex]?.trim() || "";
+      const baseDescription = values[descriptionIndex]?.trim() || "";
+      const amount = parseAmount(values[amountIndex]);
+      const currency = currencyIndex > -1 ? values[currencyIndex]?.trim() || "" : "";
 
-    if (!row.date || !row.description || Number.isNaN(amount) || !row.currency) {
-      throw new Error(`Ошибка в строке ${index + 2}. Проверьте date, description, amount и currency.`);
-    }
+      const extraDescriptionParts = values
+        .slice(descriptionIndex + 1)
+        .filter((value, valueIndex) => {
+          const originalIndex = descriptionIndex + 1 + valueIndex;
+          if (originalIndex === amountIndex || originalIndex === currencyIndex || originalIndex === dateIndex) {
+            return false;
+          }
 
-    return {
-      id: `${row.date}-${row.description}-${index}`,
-      date: row.date,
-      description: row.description,
-      amount,
-      currency: row.currency,
-      category: categorizeTransaction(row.description, amount)
-    };
-  });
+          return String(value || "").trim();
+        })
+        .map((value) => value.trim());
 
-  return transactions;
+      const description = [baseDescription, ...extraDescriptionParts]
+        .filter(Boolean)
+        .join(" | ");
+
+      if (!date || !description || Number.isNaN(amount)) {
+        return null;
+      }
+
+      return {
+        id: `${date}-${description}-${index}`,
+        date,
+        description,
+        amount,
+        currency,
+        category: categorizeTransaction(description, amount)
+      };
+    })
+    .filter(Boolean);
+
+  if (transactions.length === 0) {
+    throw new Error(
+      "Колонки найдены, но операции не распознаны. Проверьте формат сумм и строк."
+    );
+  }
+
+  return {
+    transactions,
+    delimiter,
+    delimiterLabel: delimiterNames[delimiter],
+    encoding: null
+  };
 }
 
 function categorizeTransaction(description, amount) {
@@ -124,19 +375,33 @@ function categorizeTransaction(description, amount) {
 }
 
 function formatMoney(value, currency = "EUR") {
-  return new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2
-  }).format(value);
+  if (!currency) {
+    return new Intl.NumberFormat("ru-RU", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value);
+  }
+
+  try {
+    return new Intl.NumberFormat("ru-RU", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2
+    }).format(value);
+  } catch {
+    return `${new Intl.NumberFormat("ru-RU", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value)} ${currency}`;
+  }
 }
 
 function App() {
   const [transactions, setTransactions] = useState([]);
-  const [fileName, setFileName] = useState("");
+  const [sourceInfo, setSourceInfo] = useState(null);
   const [error, setError] = useState("");
 
-  const currency = transactions[0]?.currency || "EUR";
+  const currency = transactions.find((transaction) => transaction.currency)?.currency || "EUR";
 
   const summary = useMemo(() => {
     const income = transactions
@@ -196,7 +461,7 @@ function App() {
         ? `Самая крупная категория расходов: ${biggestCategory.category} — ${formatMoney(biggestCategory.amount, currency)}.`
         : "В выписке нет расходов для анализа по категориям.",
       biggestExpense
-        ? `Самая крупная отдельная трата: ${biggestExpense.description} — ${formatMoney(Math.abs(biggestExpense.amount), biggestExpense.currency)}.`
+        ? `Самая крупная отдельная трата: ${biggestExpense.description} — ${formatMoney(Math.abs(biggestExpense.amount), biggestExpense.currency || currency)}.`
         : "В выписке нет отрицательных операций.",
       summary.balance >= 0
         ? `Баланс положительный: ${formatMoney(summary.balance, currency)}. Доля остатка от дохода: ${Math.max(savingsRate, 0).toFixed(1)}%.`
@@ -204,44 +469,47 @@ function App() {
     ];
   }, [transactions, expensesByCategory, topExpenses, summary, currency]);
 
-  function loadCsvText(text, name = "Демо-данные") {
+  function loadCsvText(text, name = "Демо-данные", encoding = "UTF-8") {
     try {
-      const parsedTransactions = parseCsv(text);
-      setTransactions(parsedTransactions);
-      setFileName(name);
+      const result = parseCsv(text);
+      setTransactions(result.transactions);
+      setSourceInfo({
+        name,
+        count: result.transactions.length,
+        delimiter: result.delimiterLabel,
+        encoding: encoding || result.encoding || "не определена"
+      });
       setError("");
     } catch (csvError) {
       setTransactions([]);
-      setFileName("");
-      setError(csvError.message);
+      setSourceInfo(null);
+      setError(csvError.message || "Файл не удалось обработать. Проверьте формат CSV.");
     }
   }
 
-  function handleFileUpload(event) {
+  async function handleFileUpload(event) {
     const file = event.target.files[0];
 
     if (!file) {
       return;
     }
 
-    const reader = new FileReader();
-
-    reader.onload = (readerEvent) => {
-      loadCsvText(readerEvent.target.result, file.name);
-    };
-
-    reader.onerror = () => {
-      setError("Не удалось прочитать файл. Попробуйте загрузить CSV ещё раз.");
-    };
-
-    reader.readAsText(file);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const decoded = decodeArrayBuffer(arrayBuffer);
+      loadCsvText(decoded.text, file.name, decoded.encoding);
+    } catch {
+      setTransactions([]);
+      setSourceInfo(null);
+      setError("Файл не удалось обработать. Проверьте формат CSV.");
+    }
   }
 
   return (
     <main className="app">
       <section className="hero">
         <div>
-          <span className="badge">CSV Finance Demo</span>
+          <span className="badge">CSV Finance Demo · v2</span>
           <h1>Анализ банковской CSV-выписки</h1>
           <p>
             Загрузите CSV-файл и получите простой dashboard: доходы, расходы,
@@ -253,7 +521,7 @@ function App() {
       <section className="upload-card">
         <div>
           <h2>Загрузка данных</h2>
-          <p>Формат CSV: date, description, amount, currency</p>
+          <p>Формат CSV: дата, описание и сумма. Валюта может быть необязательной.</p>
         </div>
 
         <div className="actions">
@@ -266,8 +534,36 @@ function App() {
           </button>
         </div>
 
-        {fileName && <div className="file-info">Загружено: {fileName}</div>}
+        {sourceInfo && (
+          <div className="source-info">
+            <div>
+              <span>Источник</span>
+              <strong>{sourceInfo.name}</strong>
+            </div>
+            <div>
+              <span>Операций</span>
+              <strong>{sourceInfo.count}</strong>
+            </div>
+            <div>
+              <span>Разделитель</span>
+              <strong>{sourceInfo.delimiter}</strong>
+            </div>
+            <div>
+              <span>Кодировка</span>
+              <strong>{sourceInfo.encoding}</strong>
+            </div>
+          </div>
+        )}
+
         {error && <div className="error">{error}</div>}
+      </section>
+
+      <section className="info-card">
+        <h2>Поддерживаемые форматы</h2>
+        <p>
+          CSV с колонками даты, описания и суммы. Разделители: запятая, точка с запятой, tab.
+          Сервис работает с учебными и простыми банковскими CSV-файлами.
+        </p>
       </section>
 
       <section className="dashboard-grid">
@@ -327,7 +623,7 @@ function App() {
                     <strong>{transaction.description}</strong>
                     <span>{transaction.date} · {transaction.category}</span>
                   </div>
-                  <b>{formatMoney(Math.abs(transaction.amount), transaction.currency)}</b>
+                  <b>{formatMoney(Math.abs(transaction.amount), transaction.currency || currency)}</b>
                 </div>
               ))}
             </div>
@@ -380,9 +676,9 @@ function App() {
                       <span className="category-pill">{transaction.category}</span>
                     </td>
                     <td className={transaction.amount >= 0 ? "positive" : "negative"}>
-                      {formatMoney(transaction.amount, transaction.currency)}
+                      {formatMoney(transaction.amount, transaction.currency || currency)}
                     </td>
-                    <td>{transaction.currency}</td>
+                    <td>{transaction.currency || "—"}</td>
                   </tr>
                 ))
               ) : (

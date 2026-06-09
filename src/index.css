@@ -63,6 +63,7 @@ input {
 }
 
 .upload-card,
+.info-card,
 .panel,
 .metric-card {
   background: rgba(255, 255, 255, 0.86);
@@ -83,15 +84,18 @@ input {
 }
 
 .upload-card h2,
+.info-card h2,
 .panel h2 {
   margin: 0;
   font-size: 22px;
   letter-spacing: -0.03em;
 }
 
-.upload-card p {
+.upload-card p,
+.info-card p {
   margin: 8px 0 0;
   color: #64748b;
+  line-height: 1.6;
 }
 
 .actions {
@@ -136,22 +140,48 @@ input {
   transform: translateY(-2px);
 }
 
-.file-info,
+.source-info {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  padding-top: 6px;
+}
+
+.source-info div {
+  padding: 14px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.source-info span {
+  display: block;
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.source-info strong {
+  display: block;
+  color: #1e293b;
+  font-size: 15px;
+  word-break: break-word;
+}
+
 .error {
   width: 100%;
   border-radius: 14px;
   padding: 12px 14px;
+  color: #991b1b;
+  background: #fee2e2;
   font-weight: 700;
 }
 
-.file-info {
-  color: #166534;
-  background: #dcfce7;
-}
-
-.error {
-  color: #991b1b;
-  background: #fee2e2;
+.info-card {
+  margin-top: 18px;
+  padding: 22px 24px;
 }
 
 .dashboard-grid {
@@ -378,6 +408,12 @@ tr:last-child td {
   padding: 28px;
 }
 
+@media (max-width: 960px) {
+  .source-info {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 @media (max-width: 860px) {
   .hero {
     padding: 30px;
@@ -413,6 +449,7 @@ tr:last-child td {
 
   .hero,
   .upload-card,
+  .info-card,
   .panel,
   .metric-card {
     border-radius: 22px;
@@ -423,9 +460,14 @@ tr:last-child td {
   }
 
   .upload-card,
+  .info-card,
   .panel,
   .metric-card {
     padding: 18px;
+  }
+
+  .source-info {
+    grid-template-columns: 1fr;
   }
 
   .top-item {
